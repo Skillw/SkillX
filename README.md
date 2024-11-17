@@ -2,7 +2,7 @@
 
 关于未来的服务端核心
 
-<img alt="Logo" height="256" src="plc/SkillX.png" width="256"/>
+<img alt="Logo" height="512" src="plc/SkillX.png" width="512"/>
 
 ---
 
