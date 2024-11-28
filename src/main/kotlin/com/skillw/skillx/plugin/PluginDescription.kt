@@ -1,5 +1,6 @@
 package com.skillw.skillx.plugin
 
+import java.io.File
 import java.net.URL
 import java.util.LinkedList
 
@@ -12,5 +13,6 @@ abstract class PluginDescription {
     abstract val softDepend: List<String>
     abstract val authors: List<String>
     abstract val loadBefore: List<String>
+    abstract val originFile: File?
     val dependenciesFiles = LinkedList<URL>()
 }

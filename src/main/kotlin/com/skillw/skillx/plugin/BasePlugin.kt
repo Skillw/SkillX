@@ -1,7 +1,11 @@
 package com.skillw.skillx.plugin
 
+import com.skillw.skillx.plugin.event.PluginCommandEvent
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger
+import net.minestom.server.MinecraftServer
+import net.minestom.server.command.builder.Command
 import net.minestom.server.event.Event
+import net.minestom.server.event.EventDispatcher
 import net.minestom.server.event.EventNode
 import java.io.File
 import java.io.IOException
@@ -22,6 +26,7 @@ abstract class BasePlugin: Plugin {
     override val dependents: MutableSet<String> = HashSet()
     override var enable: Boolean = false
     override var active: Boolean = false
+    override var commands: List<Command> = ArrayList()
 
     var isInit = false
         private set
@@ -57,6 +62,12 @@ abstract class BasePlugin: Plugin {
 
     override fun getResource(fileName: String): InputStream? {
         return getResource(Paths.get(fileName))
+    }
+
+    override fun registryCommand(command: Command) {
+        MinecraftServer.getCommandManager().register(command)
+        (commands as ArrayList<Command>).add(command)
+        EventDispatcher.call(PluginCommandEvent.Registry(this, command))
     }
 
     // 获取资源文件的输入流

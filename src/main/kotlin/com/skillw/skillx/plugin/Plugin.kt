@@ -1,8 +1,10 @@
 package com.skillw.skillx.plugin
 
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger
+import net.minestom.server.command.builder.Command
 import net.minestom.server.event.Event
 import net.minestom.server.event.EventNode
+import net.minestom.server.permission.Permission
 import java.io.File
 import java.io.InputStream
 import java.nio.file.Path
@@ -12,6 +14,7 @@ interface Plugin {
     var active: Boolean
     var enable: Boolean
 
+    var commands: List<Command>
 
     /**
      * 一个可修改的依赖插件列表
@@ -129,5 +132,7 @@ interface Plugin {
      * @return 如果资源文件成功保存则返回 true，失败则返回 false
      */
     fun savePackagedResource(target: Path): Boolean
+
+    fun registryCommand(command: Command)
 
 }

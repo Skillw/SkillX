@@ -5,23 +5,30 @@ import com.skillw.skillx.plugin.event.PluginDisableEvent
 import com.skillw.skillx.plugin.event.PluginEnableEvent
 import com.skillw.skillx.plugin.event.PluginLoadEvent
 import com.skillw.skillx.plugin.simple.JvmPluginLoader
-import net.minestom.server.MinecraftServer
+import net.kyori.adventure.text.logger.slf4j.ComponentLogger
+import net.minestom.dependencies.DependencyGetter
+import net.minestom.dependencies.ResolvedDependency
 import net.minestom.server.event.EventDispatcher
-import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 object PluginManager {
 
     internal val libsFile = File("libs")
     internal val pluginFile = File("plugins")
 
-    val LOGGER = LoggerFactory.getLogger(PluginManager::class.java)
+    val LOGGER = ComponentLogger.logger(PluginManager::class.java)
+
     var plugins = LinkedHashMap<String, Plugin>()
         private set
     val classLoaders = LinkedList<PluginLoader>()
 
+    val pluginResolvedDependency: ConcurrentHashMap<String, ArrayList<ResolvedDependency>> = ConcurrentHashMap()
 
+    private var dependency = DependencyGetter()
+
+    private var description = ArrayList<PluginDescription>()
     init {
         // JVMPluginLoader注册操作
         classLoaders.addFirst(JvmPluginLoader)
@@ -36,6 +43,22 @@ object PluginManager {
 //        POST_INIT(3),     // 初始化后
 //        STARTED(4),      // 已启动
 //    }
+
+
+    fun getPluginDescription(file: File) : PluginDescription? {
+        classLoaders.forEach {
+            if (it.isFileIgnored(file)) {
+                try {
+                    val description = it.getPluginDescription(file)
+                    return description
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    return null
+                }
+            }
+        }
+        return null
+    }
 
     //加载插件
     fun loadPlugin(file: File): Plugin? {
@@ -73,10 +96,31 @@ object PluginManager {
         }
 
         pluginFile.listFiles()?.forEach {
-            loadPlugin(it)
+            val des = getPluginDescription(it)
+            des?.let { it1 -> description.add(it1) }
         }
 
-        plugins = topologicalSort(plugins)
+        description = topologicalSort(description) as ArrayList<PluginDescription>
+
+        val artifacts = HashMap<String, List<String>>()
+
+        description.forEach {
+            dependency.addMavenResolver(it.dependencies.repositories)
+            artifacts[it.name] = it.dependencies.artifacts
+        }
+
+        artifacts.forEach { (pluginName,v) ->
+            if (!pluginResolvedDependency.containsKey(pluginName)) {
+                pluginResolvedDependency[pluginName] = ArrayList()
+            }
+            v.forEach {
+                pluginResolvedDependency[pluginName]?.add(dependency.get(it, libsFile.toPath()))
+            }
+        }
+
+        description.forEach {
+            loadPlugin(it.originFile!!)
+        }
 
         enablePlugins()
 
@@ -96,41 +140,26 @@ object PluginManager {
             enablePlugin(u)
         }
     }
-
-    //拓扑排序
-    private fun topologicalSort(plugins: LinkedHashMap<String, Plugin>): LinkedHashMap<String, Plugin> {
+    fun topologicalSort(descriptions: List<PluginDescription>): List<PluginDescription> {
         val inDegree = mutableMapOf<String, Int>() // 存储每个节点的入度
         val adjacencyList = mutableMapOf<String, MutableList<String>>() // 存储每个节点的邻居列表
+        val nameToDescription = descriptions.associateBy { it.name } // 名称到描述的映射
 
         // 初始化图
-        for (pluginName in plugins.keys) {
-            inDegree[pluginName] = 0
-            adjacencyList[pluginName] = mutableListOf()
+        for (description in descriptions) {
+            inDegree[description.name] = 0
+            adjacencyList[description.name] = mutableListOf()
         }
 
-        // 构建图并检查缺失依赖项
-        val pluginsToRemove = mutableSetOf<String>()
-        for ((pluginName, plugin) in plugins) {
-            val description = plugin.origin
-
-            // 获取所有依赖项（包括软依赖和加载前）
+        // 构建图
+        for (description in descriptions) {
             val allDependencies = description.depend + description.softDepend + description.loadBefore
             for (dependency in allDependencies) {
-                if (!plugins.containsKey(dependency)) {
-                    if (description.depend.contains(dependency)) {
-                        LOGGER.error("Error: $pluginName is missing dependency: $dependency")
-                        pluginsToRemove.add(pluginName) // 标记需要移除的插件
-                    }
-                } else {
-                    adjacencyList[dependency]!!.add(pluginName) // 添加边
-                    inDegree[pluginName] = inDegree[pluginName]!! + 1 // 增加入度
+                if (nameToDescription.containsKey(dependency)) {
+                    adjacencyList[dependency]!!.add(description.name) // 添加边
+                    inDegree[description.name] = inDegree[description.name]!! + 1 // 增加入度
                 }
             }
-        }
-
-        // 移除有缺失依赖项的插件
-        for (pluginName in pluginsToRemove) {
-            plugins.remove(pluginName)
         }
 
         // 找出所有入度为0的节点
@@ -157,18 +186,73 @@ object PluginManager {
         }
 
         // 检查图中是否有循环
-        if (sortedOrder.size != plugins.size) {
-            throw IllegalStateException("Depend ERROR")
+        if (sortedOrder.size != descriptions.size) {
+            throw IllegalStateException("检测到插件依赖关系中存在循环！")
         }
 
-        // 构建排序后的 LinkedHashMap
-        val sortedPlugins = LinkedHashMap<String, Plugin>()
-        for (pluginName in sortedOrder) {
-            sortedPlugins[pluginName] = plugins[pluginName]!!
-        }
-
-        return sortedPlugins
+        // 根据排序结果返回排序后的 PluginDescription 列表
+        return sortedOrder.map { nameToDescription[it]!! }
     }
+    //拓扑排序
+
+//    fun topologicalSort(pluginMap: Map<String, PluginDescription>): LinkedHashMap<String, PluginDescription> {
+//        val inDegree = mutableMapOf<String, Int>() // 存储每个节点的入度
+//        val adjacencyList = mutableMapOf<String, MutableList<String>>() // 存储每个节点的邻居列表
+//
+//        // 初始化图
+//        for (pluginName in pluginMap.keys) {
+//            inDegree[pluginName] = 0
+//            adjacencyList[pluginName] = mutableListOf()
+//        }
+//
+//        // 构建图
+//        for ((pluginName, description) in pluginMap) {
+//            val allDependencies = description.depend + description.softDepend + description.loadBefore
+//            for (dependency in allDependencies) {
+//                if (pluginMap.containsKey(dependency)) {
+//                    adjacencyList[dependency]!!.add(pluginName) // 添加边
+//                    inDegree[pluginName] = inDegree[pluginName]!! + 1 // 增加入度
+//                }
+//            }
+//        }
+//
+//        // 找出所有入度为0的节点
+//        val zeroInDegreeQueue = ArrayDeque<String>()
+//        for ((node, degree) in inDegree) {
+//            if (degree == 0) {
+//                zeroInDegreeQueue.add(node)
+//            }
+//        }
+//
+//        // 执行拓扑排序
+//        val sortedOrder = mutableListOf<String>()
+//        while (zeroInDegreeQueue.isNotEmpty()) {
+//            val node = zeroInDegreeQueue.removeFirst()
+//            sortedOrder.add(node)
+//
+//            // 减少邻居节点的入度
+//            for (neighbor in adjacencyList[node]!!) {
+//                inDegree[neighbor] = inDegree[neighbor]!! - 1
+//                if (inDegree[neighbor] == 0) {
+//                    zeroInDegreeQueue.add(neighbor)
+//                }
+//            }
+//        }
+//
+//        // 检查图中是否有循环
+//        if (sortedOrder.size != pluginMap.size) {
+//            throw IllegalStateException("检测到插件依赖关系中存在循环！")
+//        }
+//
+//        // 根据排序结果构建新的 LinkedHashMap
+//        val sortedPluginMap = LinkedHashMap<String, PluginDescription>()
+//        for (pluginName in sortedOrder) {
+//            sortedPluginMap[pluginName] = pluginMap[pluginName]!!
+//        }
+//
+//        return sortedPluginMap
+//    }
+
 
     //激活插件
     fun activePlugin(plugin: Plugin) {

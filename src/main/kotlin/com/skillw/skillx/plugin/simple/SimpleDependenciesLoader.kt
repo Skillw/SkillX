@@ -14,7 +14,7 @@ object SimpleDependenciesLoader: DependenciesLoader {
         val dependency = DependencyGetter()
         dependency.addMavenResolver(description.dependencies.repositories)
         description.dependencies.artifacts.forEach {
-            val resolver = dependency.get(it, PluginManager.libsFile)
+            val resolver = dependency.get(it, PluginManager.libsFile.toPath())
             loadDependicyToPlugin(description, resolver, classLoader)
             log.trace("依赖：{}", resolver)
         }

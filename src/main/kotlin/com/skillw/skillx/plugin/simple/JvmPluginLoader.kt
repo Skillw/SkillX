@@ -1,11 +1,12 @@
 package com.skillw.skillx.plugin.simple
 
 import com.skillw.skillx.plugin.*
+import com.skillw.skillx.plugin.event.PluginCommandEvent
 import com.skillw.skillx.plugin.event.PluginLoadEvent
+import net.kyori.adventure.text.logger.slf4j.ComponentLogger
 import net.minestom.dependencies.maven.MavenRepository
 import net.minestom.server.MinecraftServer
 import net.minestom.server.event.EventDispatcher
-import org.slf4j.LoggerFactory
 import taboolib.module.configuration.Configuration
 import java.io.File
 import java.nio.file.Path
@@ -17,20 +18,22 @@ object JvmPluginLoader: PluginLoader {
 
     val classes = ConcurrentHashMap<String, Class<*>>()
 
-    val log = LoggerFactory.getLogger(JvmPluginLoader::class.java)
+    val log = ComponentLogger.logger(JvmPluginLoader::class.java)
 
     val classLoaders = ConcurrentHashMap<String, PluginClassLoader>()
 
     override fun loadPlugin(file: File): Plugin? {
         val description = getPluginDescription(file)
         var pluginV: Plugin? = null
-        description?.let {
-            log.info("正在加载${it.name}")
+        description?.let { info ->
+            log.info("正在加载${info.name}")
             val dataFolder = Path.of(file.parentFile.path, description.name)
-            val main = it.main
+            val main = info.main
             val classLoader = PluginClassLoader(this, this.javaClass.classLoader, file)
             //依赖处理
-            SimpleDependenciesLoader.loadDependencies(it, classLoader)
+            PluginManager.pluginResolvedDependency[description.name]?.forEach {
+                SimpleDependenciesLoader.loadDependicyToPlugin(description, it , classLoader)
+            }
 
             classLoaders[description.name] = classLoader
             try {
@@ -90,6 +93,7 @@ object JvmPluginLoader: PluginLoader {
                     dependencies.artifacts = dependenciesConfig.getStringList("artifacts")
                     return@run dependencies
                 }
+                override val originFile: File = file
                 override val authors: List<String> = config.getStringList("authors")
                 override val depend: List<String> = config.getStringList("depend")
                 override val softDepend: List<String> = config.getStringList("softDepend")
@@ -126,6 +130,10 @@ object JvmPluginLoader: PluginLoader {
             plugin.onDisable()
             plugin.enable = false
             MinecraftServer.getGlobalEventHandler().removeChild(plugin.eventNode)
+            plugin.commands.forEach {
+                MinecraftServer.getCommandManager().unregister(it)
+                EventDispatcher.call(PluginCommandEvent.UnRegister(plugin, it))
+            }
         }
     }
 

@@ -21,6 +21,8 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
 
+    // Add shrinkwrap resolver
+    implementation("org.jboss.shrinkwrap.resolver:shrinkwrap-resolver-depchain:3.1.4")
     implementation("org.yaml:snakeyaml:2.2")
     implementation("com.typesafe:config:1.4.3")
     implementation("com.electronwill.night-config:core:3.6.7")
